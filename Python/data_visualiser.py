@@ -9,7 +9,7 @@ import pandas as pd
 
 from bokeh.io import output_file, show
 from bokeh.layouts import column, row
-from bokeh.models import CheckboxGroup, ColumnDataSource, CustomJS
+from bokeh.models import CheckboxGroup, ColumnDataSource, CustomJS, Legend, Div
 from bokeh.palettes import Dark2_5 as palette, Viridis3
 from bokeh.plotting import figure
 from itertools import cycle
@@ -95,9 +95,12 @@ plot1 = figure(title="Graphs from the heating system sensors.",
 
 line_colors = cycle(palette)
 
+legend_items = []
 for dev, values in time_series_dict.items():
     if dev == "ID:0xF002":
         continue  # Skip this device.
+    elif dev == "ID:0x5EE0":
+        continue  # Skip this device too.
     elif dev == "ID:0x3EE0":
         label = "Door, t°C × 10"
         values = values[0], list(map(lambda a: int(a)/10, values[1]))
@@ -112,16 +115,38 @@ for dev, values in time_series_dict.items():
     else:
         label = dev
     x, y = values
-    plot1.line(x, y, legend_label=label, color=next(line_colors))
+    line = plot1.line(x, y, color=next(line_colors))
+    legend_items.append((label, [line]))
 
-plot1.circle(load_timedate, load_amount,
-             legend_label="Loads, RefVol.", color=next(line_colors))
+load_line = plot1.circle(load_timedate, load_amount,
+                         color=next(line_colors))
 
-# plot1.y_range.start = 0
-plot1.x_range.range_padding = 0.1
-plot1.xaxis.major_label_orientation = 1
-# plot1.xgrid.grid_line_color = None
+legend_items.append(("Loads, RefVol.", [load_line]))
 
+legend = Legend(items=legend_items)
+plot1.add_layout(legend, 'right')
+
+checkbox_group = CheckboxGroup(labels=[label for label, _ in legend_items], active=list(range(len(legend_items))))
+checkbox_group.js_on_change('active', CustomJS(args=dict(legend=legend), code="""
+    var items = legend.items;
+    for (var i = 0; i < items.length; i++) {
+        items[i].renderers[0].visible = cb_obj.active.includes(i);
+    }
+    legend.location = "right";
+"""))
+
+# Create Div, which uses JavaScript.
+js = CustomJS(args=dict(p=plot1), code="""
+    function resize() {
+        p.plot_width = window.innerWidth - 100;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+""")
+div = Div()
+div.js_on_change('text', js)
+
+layout = row(div, checkbox_group, plot1)
 output_file("graph.html", title="heating system log")
 
-show(plot1, plot_width=800, plot_height=400)  # Open a browser.
+show(layout)  # Open a browser.
